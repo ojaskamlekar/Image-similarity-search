@@ -37,6 +37,7 @@ def main():
         report.update({'status': 'smoke_test_only' if manifest['smoke_test'] else 'held_out_evaluation',
                        'model_sha256': digest, 'seed': manifest['seed'],
                        'manifest_sha256': hashlib.sha256(Path(args.manifest).read_bytes()).hexdigest(),
+                       'split_strategy': manifest.get('split_strategy', 'image_disjoint'),
                        'split_counts': manifest['counts'],
                        'relevance': 'Same explicit category label; not human-rated visual similarity',
                        'limitations': 'Image-disjoint, same-category evaluation. Review perceptual duplicates '
@@ -56,7 +57,8 @@ def main():
                 'validation_contributors': len(contributors['validation']),
                 'test_contributors': len(contributors['test']),
                 'train_test_shared_contributors': len(contributors['train'] & contributors['test']),
-                'note': 'Splits are image-disjoint, not contributor-disjoint; shared backgrounds may inflate results.'}
+                'note': 'Contributor IDs are kept in one split when group labels are provided; '
+                        'this does not establish product-identity or perceptual-duplicate separation.'}
     except (ValueError, OSError, KeyError) as exc:
         parser.error(str(exc))
     Path(args.output).write_text(json.dumps(report, indent=2), encoding='utf-8')

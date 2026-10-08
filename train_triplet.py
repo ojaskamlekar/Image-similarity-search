@@ -35,7 +35,10 @@ class TripletTrainer:
             for step in range(steps_per_epoch):
                 self.triplet_model.reset_metrics()
                 inputs = self.data_generator.generate_batch(batch_size)
-                train_losses.append(float(self.triplet_model.train_on_batch(list(inputs), dummy)))
+                batch_loss = float(self.triplet_model.train_on_batch(list(inputs), dummy))
+                if not np.isfinite(batch_loss):
+                    raise ValueError('Training loss became non-finite; run aborted')
+                train_losses.append(batch_loss)
                 if (step + 1) % 25 == 0 or step + 1 == steps_per_epoch:
                     print(f'Epoch {epoch + 1}/{epochs}, step {step + 1}/{steps_per_epoch}: '
                           f'loss={np.mean(train_losses[-25:]):.5f}, '
@@ -45,6 +48,8 @@ class TripletTrainer:
                 self.triplet_model.reset_metrics()
                 val_losses.append(float(self.triplet_model.test_on_batch(list(inputs), dummy)))
             loss, val_loss = float(np.mean(train_losses)), float(np.mean(val_losses))
+            if not np.isfinite(val_loss):
+                raise ValueError('Validation loss became non-finite; run aborted')
             self.history['loss'].append(loss)
             self.history['val_loss'].append(val_loss)
             print(f'Epoch {epoch + 1}/{epochs}: loss={loss:.5f}, val_loss={val_loss:.5f}', flush=True)
@@ -117,7 +122,12 @@ def main():
         parser.error('Output model already exists; choose a new --output-dir')
     config = {**vars(args), 'tensorflow_version': tf.__version__,
               'gpu_devices': [str(d) for d in devices], 'input_shape': [224, 224, 3],
-              'embedding_dimension': 128}
+              'embedding_dimension': 128,
+              'source_files_sha256': {
+                  name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                  for name in ('train_triplet.py', 'triplet_model.py', 'triplet_data_generator.py',
+                               'dataset_utils.py', 'evaluate_triplet.py', 'retrieval_metrics.py',
+                               'extract_features_triplet.py')}}
     (output_dir / 'run_config.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
     train_data = TripletDataGenerator(args.image_folder, records=splits['train'], seed=args.seed)
     val_data = TripletDataGenerator(args.image_folder, records=splits['validation'], seed=args.seed + 1)
@@ -129,6 +139,7 @@ def main():
     trainer = TripletTrainer(triplet_model, base_network, train_data, val_data, output_dir)
     trainer.train(args.epochs, args.batch_size, args.steps_per_epoch, args.validation_steps)
     manifest = {'schema_version': 1, 'seed': args.seed, 'smoke_test': args.smoke_test,
+                'split_strategy': 'group_disjoint' if 'group' in records[0] else 'image_disjoint',
                 'minimum_test_images': args.min_test_images, 'counts': counts, 'splits': splits,
                 'model_sha256': hashlib.sha256((output_dir / 'triplet_base_final.h5').read_bytes()).hexdigest()}
     (output_dir / 'dataset_split.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')

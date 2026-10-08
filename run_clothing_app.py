@@ -19,6 +19,10 @@ def main():
     metadata = json.loads((run_dir / 'triplet_metadata.json').read_text(encoding='utf-8'))
     if hashlib.sha256(model_path.read_bytes()).hexdigest() != metadata['model_sha256']:
         parser.error('Model and search index do not match; regenerate embeddings')
+    for filename, key in [('triplet_features.npy', 'features_sha256'),
+                          ('triplet_images.npy', 'filenames_sha256')]:
+        if hashlib.sha256((run_dir / filename).read_bytes()).hexdigest() != metadata[key]:
+            parser.error(f'Index artifact changed: {filename}')
     for row in metadata['images']:
         if Path(row['filename']).name != row['filename']:
             parser.error('Unsafe filename in index')

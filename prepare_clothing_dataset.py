@@ -57,9 +57,10 @@ def prepare(source, destination, minimum_per_category=30):
     for row in retained:
         shutil.copy2(source / 'images' / row['filename'], images / row['filename'])
     with (destination / 'labels.csv').open('w', newline='', encoding='utf-8') as stream:
-        writer = csv.DictWriter(stream, fieldnames=['filename', 'label'])
+        writer = csv.DictWriter(stream, fieldnames=['filename', 'label', 'group'])
         writer.writeheader()
-        writer.writerows({k: row[k] for k in ('filename', 'label')} for row in retained)
+        writer.writerows({'filename': row['filename'], 'label': row['label'],
+                          'group': row['sender_id']} for row in retained)
     commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
     report = {'source': 'https://github.com/alexeygrigorev/clothing-dataset',
               'source_commit': commit, 'license': 'CC0-1.0', 'metadata_rows': len(rows),

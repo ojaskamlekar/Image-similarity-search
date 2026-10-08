@@ -41,6 +41,9 @@ counts as relevant during training and evaluation, so inspect them manually.
 distributes files arbitrarily and cannot determine what is in an image.
 Numeric filename ranges are no longer treated as categories.
 
+An optional `group` CSV column keeps related images together across splits.
+The Clothing Dataset importer uses contributor IDs as groups.
+
 ```bash
 python train_triplet.py --audit-only
 # With a CSV:

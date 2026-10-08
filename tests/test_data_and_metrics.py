@@ -54,6 +54,20 @@ class DatasetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             split_records(rows, 0.6, 0.6)
 
+    def test_contributor_groups_are_disjoint_and_reproducible(self):
+        rows = [{'filename': f'{label}_{group}_{i}.jpg', 'label': label, 'group': str(group)}
+                for label in ('shirt', 'pants') for group in range(12) for i in range(3)]
+        splits = split_records(rows)
+        self.assertEqual(splits, split_records(rows))
+        groups = [{row['group'] for row in records} for records in splits.values()]
+        for i, left in enumerate(groups):
+            for right in groups[i + 1:]:
+                self.assertFalse(left & right)
+        for records in splits.values():
+            self.assertEqual({r['label'] for r in records}, {'shirt', 'pants'})
+        with self.assertRaisesRegex(ValueError, 'three groups'):
+            split_records([{**row, 'group': 'one'} for row in rows])
+
     def test_conflicting_duplicate_and_overlapping_manifest_fail(self):
         with tempfile.TemporaryDirectory() as folder:
             self.make_dataset(folder)

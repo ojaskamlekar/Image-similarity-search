@@ -21,7 +21,7 @@ duplicates, missing/unreadable files, and categories with fewer than 30 unique
 images. It refuses to overwrite an existing prepared directory.
 
 For the pinned source, preparation retained **5,073 images in 16 categories**.
-The seed-42 split has **3,043 training, 1,015 validation, and 1,015 test images**.
+The seed-42 contributor-disjoint split has **3,208 training, 978 validation, and 887 test images**.
 Source metadata has 5,403 rows; all 330 exclusions are recorded explicitly.
 The dataset is imbalanced and the sampler chooses categories uniformly.
 
@@ -41,6 +41,9 @@ bash scripts/train_clothing_wsl.sh runs/clothing-20261009
 ```
 
 Setup downloads an isolated Python 3.11 and several GB of TensorFlow/CUDA packages.
+The preparation CSV includes a group column containing the source contributor ID.
+Grouped splitting keeps each contributor entirely within one partition, and
+searches seeded candidate allocations for approximate category balance.
 The training script requires a detected GPU, enables GPU memory growth, uses the
 existing 224x224 triplet CNN, and trains for 10 epochs with batch size 4,
 400 sampled triplet batches per epoch, and 20 fixed validation batches.
@@ -75,9 +78,9 @@ This is a local demo, not a production deployment.
 ## Interpretation
 
 Same-category images count as relevant. These labels do not establish that two
-photos show the same product. Splits are image-disjoint but not contributor-disjoint:
-shared contributors/backgrounds and perceptual duplicates can inflate results.
-The evaluation report records contributor overlap. Test metrics describe this
+photos show the same product. Splits are contributor-disjoint as well as image-disjoint.
+Perceptual duplicates or related products across different contributor IDs may
+still inflate results. The evaluation report records contributor overlap. Test metrics describe this
 dataset and split, not general real-world accuracy.
 
 The full dataset is indexed for the interactive demo; held-out evaluation uses

@@ -245,6 +245,8 @@ def main():
     np.save(f'{OUTPUT_PREFIX}_features.npy', features)
     np.save(f'{OUTPUT_PREFIX}_images.npy', np.asarray(image_names))
     metadata = {'model_sha256': hashlib.sha256(Path(MODEL_PATH).read_bytes()).hexdigest(),
+                'features_sha256': hashlib.sha256(Path(f'{OUTPUT_PREFIX}_features.npy').read_bytes()).hexdigest(),
+                'filenames_sha256': hashlib.sha256(Path(f'{OUTPUT_PREFIX}_images.npy').read_bytes()).hexdigest(),
                 'image_count': len(paths), 'embedding_dimension': int(features.shape[1]),
                 'preprocessing': {'input_shape': list(extractor.model.input_shape[1:]),
                                   'color': 'RGB', 'dtype': 'float32', 'scale': 'divide by 255'},
