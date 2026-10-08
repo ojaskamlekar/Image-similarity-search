@@ -314,9 +314,10 @@
                             <input type="number" id="numResults" min="1" max="50" value="10">
                         </div>
                         <div class="control-group">
-                            <label for="threshold">Similarity Threshold:</label>
-                            <input type="range" id="threshold" min="0" max="100" value="30">
-                            <small id="thresholdValue">30%</small>
+                            <label for="threshold">Minimum distance score:</label>
+                            <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.30">
+                            <small id="thresholdValue">0.30</small>
+                            <small>Score from 0 to 1; higher means closer embeddings. Not a probability.</small>
                         </div>
                     </div>
                     <div class="button-group">
@@ -363,7 +364,7 @@
         let selectedFile = null;
         
         threshold.addEventListener('input', (e) => {
-            thresholdValue.textContent = e.target.value + '%';
+            thresholdValue.textContent = Number(e.target.value).toFixed(2);
         });
         
         uploadZone.addEventListener('click', () => fileInput.click());
@@ -424,7 +425,7 @@
             const formData = new FormData();
             formData.append('image', selectedFile);
             formData.append('num_results', numResults.value);
-            formData.append('threshold', (threshold.value / 100).toFixed(2));
+            formData.append('threshold', Number(threshold.value).toFixed(2));
             
             loading.style.display = 'block';
             results.style.display = 'none';
@@ -442,7 +443,7 @@
                     showError(data.error);
                 } else {
                     if (data.results.length === 0) {
-                        showError('No matches found. Try lowering the similarity threshold.');
+                        showError('No matches found. Try lowering the score threshold.');
                     } else {
                         displayResults(data.results);
                         resultsSubtitle.textContent = `Showing ${data.results.length} matches • Method: ${data.method} • Query time: ${data.query_time_ms} ms`;
@@ -465,12 +466,12 @@
                 const card = document.createElement('div');
                 card.className = 'result-card';
                 
-                const percentage = (result.similarity * 100).toFixed(1);
+                const score = Number(result.score ?? result.similarity).toFixed(3);
                 
                 card.innerHTML = `
                     <div style="position: relative;">
                         <img src="${result.image}" alt="${result.name}" class="result-image">
-                        <div class="similarity-badge">${percentage}%</div>
+                        <div class="similarity-badge">Score: ${score}</div>
                     </div>
                     <div class="result-info">
                         <div class="result-name">${result.name}</div>

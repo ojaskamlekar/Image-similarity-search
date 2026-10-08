@@ -1,385 +1,209 @@
 # AI Image Similarity Search
 
-Find visually similar images using deep learning. Train a Triplet Network on your dataset and search through thousands of images instantly.
+A Flask demo that ranks images by Euclidean distance between learned embeddings.
+The model is a custom convolutional network trained from scratch with triplet loss.
+Model quality has **not** been established on a representative held-out benchmark.
 
-## Quick Start
+## Setup
 
-1. **Prepare images**: Place your images in `static/dataset/`
-2. **Train model**: `python train_triplet.py`
-3. **Extract features**: `python extract_features_triplet.py`
-4. **Start server**: `python app_triplet.py`
-5. **Open browser**: Visit `http://localhost:5000`
+Use **Python 3.10 or 3.11** in a virtual environment:
 
-## Project Files
-
-### Core Model
-
-**triplet_model.py** - Deep learning model architecture
-- `triplet_loss()`: Loss function for training
-- `create_base_network()`: CNN backbone (ResNet-like architecture)
-- `create_triplet_network()`: Three-input Siamese network
-- `compile_triplet_model()`: Compile with Adam optimizer
-- Inputs: 224x224 RGB images
-- Outputs: 128-dimensional embeddings
-
-### Data Pipeline
-
-**triplet_data_generator.py** - Dataset management and triplet generation
-- `TripletDataGenerator` class loads images from folder
-- Auto-detects categories from filenames (e.g., `shirt_001.jpg`, `pants_001.jpg`)
-- `load_dataset()`: Organizes images by category
-- `generate_triplet()`: Creates (anchor, positive, negative) triplets
-- `generate_batch()`: Returns batches of triplets for training
-- `get_statistics()`: Shows dataset breakdown
-
-### Training
-
-**train_triplet.py** - Training script
-- `TripletTrainer` class handles model training
-- Loads data using `TripletDataGenerator`
-- Trains for configurable epochs with validation
-- Saves checkpoints every 5 epochs
-- Outputs: `triplet_base_final.h5` (trained model)
-- Quick version: 10 epochs, 20 steps per epoch
-- Generates `training_history.png` visualization
-
-**Configuration options:**
-```python
-EPOCHS = 10              # Training epochs
-BATCH_SIZE = 16        # Triplets per batch
-STEPS_PER_EPOCH = 20   # Batches per epoch
-LEARNING_RATE = 0.0001 # Adam optimizer rate
-MARGIN = 0.2           # Triplet loss margin
-```
-
-### Feature Extraction
-
-**extract_features_triplet.py** - Generate embeddings and index
-- `TripletFeatureExtractor` class loads trained model
-- `extract_features()`: Get embedding for single image
-- `extract_all_features()`: Process entire dataset
-- Outputs:
-  - `triplet_features.npy`: All image embeddings
-  - `triplet_images.npy`: Image filenames
-  - `triplet_embedding_space.png`: t-SNE visualization (optional)
-
-**feature_extraction.py** - Alternative using MobileNetV2 (reference)
-- Pre-trained CNN-based feature extraction
-- Not used if triplet network is available
-- Kept for comparison
-
-### Web Application
-
-**app_triplet.py** - Flask server
-- `@app.route('/')`: Main page
-- `@app.route('/search')`: Upload image and find similar results
-  - Input: Image file, number of results, similarity threshold
-  - Output: JSON with similar images and similarity scores
-- `@app.route('/stats')`: System statistics
-- Loads `triplet_base_final.h5` model
-- Loads `triplet_features.npy` embeddings
-- Returns results with Euclidean distance scoring
-
-**index.html** (root) & **templates/index.html** - Web interface
-- Drag-drop image upload zone
-- Preview uploaded image
-- Adjustable number of results (5-50)
-- Similarity threshold slider (0-100%)
-- Results grid with similarity percentages
-- Real-time search with loading indicator
-
-### Utility
-
-**rename_images.py** - Organize images into categories
-- Interactive script to rename files
-- Groups images into categories
-- Creates pattern: `category_001.jpg`, `category_002.jpg`, etc.
-- Example:
-  ```bash
-  python rename_images.py
-  # Enter 3 categories: shirt, pants, dress
-  # Distributes images evenly across categories
-  ```
-
-**requirements.txt** - Python dependencies
-```
-tensorflow==2.13.0
-opencv-python==4.12.0.88
-scikit-learn==1.3.2
-numpy==1.24.3
-flask==3.0.0
-werkzeug==3.0.6
-matplotlib==3.7.1
-hnswlib==0.7.1
-gunicorn==20.1.0
-```
-
-## Data Format
-
-### Image Naming
-Images must follow this pattern to auto-detect categories:
-```
-shirt_001.jpg       Category: "shirt"
-shirt_002.jpg       Category: "shirt"
-pants_001.jpg       Category: "pants"
-pants_002.jpg       Category: "pants"
-dress_001.jpg       Category: "dress"
-```
-
-Or use prefixes with delimiter:
-```
-shirt-001.jpg
-pants-001.jpg
-dress-001.jpg
-```
-
-Minimum requirement: 2 categories with 2+ images each
-
-### Directory Structure
-```
-static/
-  dataset/          # Your images go here
-    shirt_001.jpg
-    shirt_002.jpg
-    pants_001.jpg
-    ...
-  uploads/          # Temporary upload storage (auto-created)
-
-templates/
-  index.html        # Web UI template
-
-triplet_model.py         # Model architecture
-triplet_data_generator.py # Data loading
-train_triplet.py         # Training
-extract_features_triplet.py # Feature extraction
-app_triplet.py           # Flask server
-index.html               # Static HTML
-```
-
-## Workflow
-
-### 1. Organize Images
 ```bash
-python rename_images.py
-# Distributes images into categories automatically
-# Creates: shirt_001.jpg, shirt_002.jpg, pants_001.jpg, etc.
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-### 2. Train Model
-```bash
-python train_triplet.py
-# Loads images from static/dataset/
-# Generates triplet batches (anchor, positive, negative from different categories)
-# Trains with triplet loss
-# Saves: triplet_base_final.h5
+Dependencies are pinned in one place: [requirements.txt](requirements.txt).
+OpenCV 4.8.1 is used with NumPy 1.24.3 and TensorFlow 2.13; the previous
+OpenCV 4.12 pin required an incompatible NumPy version. TensorFlow 2.13
+does not support Python 3.12 or newer. CPU training can be slow; no latency
+or training-time guarantees are claimed.
+
+## Label and audit your data
+
+Place JPG/JPEG/PNG images directly in `static/dataset/`. Supply real semantic
+labels with filenames such as `shirt_001.jpg`, `pants-002.jpg`, or
+`shirt (12).jpg`. For arbitrary filenames, supply a CSV:
+
+```csv
+filename,label
+1163.jpg,shirt
+1525.jpg,pants
 ```
 
-### 3. Extract Features
+The CSV must contain exactly one row for every image. Labels determine what
+counts as relevant during training and evaluation, so inspect them manually.
+**Do not use `rename_images.py` to generate training labels:** that legacy utility
+distributes files arbitrarily and cannot determine what is in an image.
+Numeric filename ranges are no longer treated as categories.
+
 ```bash
+python train_triplet.py --audit-only
+# With a CSV:
+python train_triplet.py --labels-csv labels.csv --audit-only
+```
+
+The audit removes byte-identical copies before splitting and rejects conflicting
+labels. Each category needs enough unique images for at least two images in each
+of train, validation, and test (at least six per category with default fractions).
+No rare category is silently dropped. Review resized/cropped duplicates and
+keep related product, subject, or capture-session images in the same split before
+using this pipeline; byte hashes do not detect perceptual duplicates.
+
+The bundled 97 files are demonstration data, with categories too sparse for
+these splits. Add correctly labeled data before training. Default training also
+requires at least **100 unique test images**. This is a project guardrail, not a
+statistical sample-size guarantee; choose a representative dataset and adequate
+per-category coverage for the intended use.
+
+## Train and evaluate
+
+Run commands from the repository root:
+
+```bash
+python train_triplet.py --epochs 10 --batch-size 16 --steps-per-epoch 20
+python evaluate_triplet.py
 python extract_features_triplet.py
-# Loads trained model
-# Extracts 128-d embeddings for all images
-# Saves: triplet_features.npy, triplet_images.npy
-# Creates visualization: triplet_embedding_space.png
-```
-
-### 4. Run Web Server
-```bash
 python app_triplet.py
-# Starts Flask on http://localhost:5000
-# Loads model and embeddings
-# Ready for searches
 ```
 
-## How It Works
+Open [localhost:5000](http://localhost:5000).
 
-### Triplet Loss Training
-The model learns by comparing three images simultaneously:
-- **Anchor**: Reference image
-- **Positive**: Similar image (same category)
-- **Negative**: Different image (different category)
+Training uses a seeded, per-category image split (approximately 60% train,
+20% validation, 20% test). Triplets never cross partitions. Validation uses a
+fixed set of triplets from validation images; the best validation-loss checkpoint
+is saved as `triplet_base_final.h5`. Test images are never used to train or
+select the checkpoint.
 
-Loss function pushes positive closer and negative further away:
-```
-Loss = max(distance(anchor, positive) - distance(anchor, negative) + margin, 0)
-```
+Outputs:
 
-### Similarity Search
-After training, searching works like this:
-1. Extract embedding of uploaded image (128-d vector)
-2. Calculate Euclidean distance to all dataset embeddings
-3. Sort by distance (smaller = more similar)
-4. Convert to similarity percentage
-5. Return top N results above threshold
+- `dataset_split.json`: exact filenames, labels, content hashes, seed, counts,
+  and the selected model's hash.
+- `training_history.json` and `training_history.png`: train/validation loss.
+- `evaluation_report.json`: Precision@k, Recall@k, Hit Rate@k, full-ranking mAP,
+  per-category mAP, macro-category mAP, effective k, and query-bootstrap intervals.
+- `triplet_features.npy` and `triplet_images.npy`: the search index.
 
-## Customization
+The evaluator uses **every test image** as a query against the held-out test
+gallery, removes the query's own entry, and treats same-category images as
+relevant. Precision divides by `min(k, gallery_size - 1)`; recall divides by
+the query's total relevant peers. AP averages precision at every relevant rank.
+Queries share a gallery: bootstrap intervals are descriptive and do not capture
+variation across training runs or datasets. The evaluator verifies file hashes,
+partition disjointness, and the model hash; stale or mismatched artifacts fail.
 
-### Change Embedding Dimension
-Edit `triplet_model.py`:
-```python
-embedding_dim = 256  # Instead of 128
-```
+Use validation data for threshold/hyperparameter decisions; reserve the test set
+for the final assessment. Repeat training with multiple seeds and report category
+coverage, dataset provenance, labeling quality, and relevance to the deployment
+domain. Category retrieval is only a proxy for human-rated visual similarity.
+No measured accuracy is included in this repository.
 
-### Adjust Training
-Edit `train_triplet.py`:
-```python
-EPOCHS = 50              # More training
-BATCH_SIZE = 32         # Larger batches
-LEARNING_RATE = 0.00005 # Slower learning
-MARGIN = 0.5            # Harder triplets
-```
+For pipeline checks on a smaller but structurally valid dataset:
 
-### Change Image Size
-Edit `triplet_model.py`:
-```python
-input_shape = (128, 128, 3)  # Instead of (224, 224, 3)
-```
-
-## Requirements
-
-- Python 3.9+
-- TensorFlow 2.13+
-- OpenCV 4.12+
-- NumPy 1.24+
-- Flask 3.0+
-- 4GB+ RAM
-
-Install dependencies:
 ```bash
-pip install -r requirements.txt
+python train_triplet.py --smoke-test --epochs 1 --steps-per-epoch 1 --validation-steps 1
+python evaluate_triplet.py
 ```
 
-## Troubleshooting
+Smoke mode still requires valid partitions. Its report is marked
+`smoke_test_only` and must not be presented as a model benchmark.
+`--min-test-images`, `--validation-fraction`, `--test-fraction`, and
+`--seed` are configurable. A lower count does not establish reliability.
+Pre-existing checkpoints have no split manifest and cannot substantiate held-out
+performance; retrain with this workflow.
 
-**"No categories detected"**
-- Rename images: `python rename_images.py`
-- Or manually use pattern: `category_001.jpg`
+Feature extraction indexes the full dataset for the interactive demo. The
+evaluator operates separately on the held-out test partition.
 
-**"Model not loaded"**
-- Run training first: `python train_triplet.py`
+## Architecture and source files
 
-**"No embeddings loaded"**
-- Extract features first: `python extract_features_triplet.py`
+The modules imported by training are committed at the repository root:
 
-**Web server won't start**
-- Check port 5000 is free
-- Check all files exist: `triplet_base_final.h5`, `triplet_features.npy`, `triplet_images.npy`
+| File | Responsibility |
+| --- | --- |
+| [triplet_model.py](triplet_model.py) | Shared CNN, triplet network, loss and optimizer |
+| [triplet_data_generator.py](triplet_data_generator.py) | Triplets within one explicit partition |
+| [dataset_utils.py](dataset_utils.py) | Labels, deduplication, splits and fingerprint validation |
+| [train_triplet.py](train_triplet.py) | Training and validation checkpoint selection |
+| [evaluate_triplet.py](evaluate_triplet.py) | Held-out retrieval report |
+| [retrieval_metrics.py](retrieval_metrics.py) | Ranking metrics and descriptive intervals |
+| [extract_features_triplet.py](extract_features_triplet.py) | Search embeddings |
+| [app_triplet.py](app_triplet.py) | Flask search, gallery and stats endpoints |
+| [templates/index.html](templates/index.html) | Served web UI |
+| [index.html](index.html) | Standalone UI copy |
 
-**Out of memory**
-- Reduce `BATCH_SIZE` in `train_triplet.py`
-- Reduce `STEPS_PER_EPOCH`
+The backbone has convolutional blocks with 64, 128, 256, and 512 channels,
+batch normalization, pooling/dropout, global average pooling, dense layers of
+512 and 256 units, and a **128-dimensional L2-normalized output**.
+It is not ResNet and does not use pretrained weights. Inputs are 224×224 RGB
+images scaled to [0, 1]. All three branches share weights. Training minimizes:
 
-## API Response
+```text
+mean(max(||anchor - positive||² - ||anchor - negative||² + 0.2, 0))
+```
 
-### /search (POST)
+The normalization layer is registered for model serialization. Architecture,
+forward-pass, triplet-loss, one-batch training, and save/reload checks run in CI.
+
+## Score interpretation and API
+
+For unit-length embeddings, Euclidean distance lies in [0, 2]. Search returns:
+
+```text
+score = clip(1 - distance / 2, 0, 1)
+```
+
+This is a **distance-based ranking score**, not a calibrated probability,
+confidence, or percentage likelihood of relevance. A score of 0.90 does not mean
+a 90% chance of similarity. No probability calibration has been fitted.
+The UI displays a decimal score, and its threshold is in the same [0, 1] units.
+
+`POST /search` accepts multipart fields `image`, `num_results` (5–50),
+and `threshold` (0–1). For example, a result at distance 0.18 has score 0.91:
+
 ```json
 {
-  "results": [
-    {
-      "filename": "shirt_002.jpg",
-      "similarity": 94.5,
-      "embedding_distance": 0.18
-    },
-    {
-      "filename": "shirt_003.jpg",
-      "similarity": 89.2,
-      "embedding_distance": 0.32
-    }
-  ],
-  "total_results": 2
+  "success": true,
+  "query_image": "/static/uploads/query.jpg",
+  "results": [{
+    "image": "/static/dataset/shirt_002.jpg",
+    "name": "shirt_002.jpg",
+    "score": 0.91,
+    "similarity": 0.91,
+    "distance": 0.18
+  }],
+  "total_matches": 1,
+  "method": "Triplet Network with Euclidean Distance",
+  "score_type": "distance_based_similarity",
+  "score_description": "Distance score: clip(1 - Euclidean distance / 2, 0, 1); not a probability",
+  "calibrated_probability": false
 }
 ```
 
-### /stats (GET)
-```json
-{
-  "model_loaded": true,
-  "embeddings_loaded": true,
-  "total_images": 1008,
-  "embedding_dimension": 128,
-  "model_type": "Triplet Network",
-  "similarity_metric": "Euclidean Distance"
-}
+`similarity` is retained as a compatibility alias for `score`.
+`GET /stats` reports artifact availability and score semantics.
+`GET /gallery` lists indexed images. Search uses an exact scan, not an HNSW index.
+
+## Verification and troubleshooting
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
-## File Purposes at a Glance
+The pure data/metric tests need NumPy; TensorFlow-dependent tests require the
+complete requirements. CI installs dependencies on Python 3.10 and 3.11.
 
-| File | Purpose | Input | Output |
-|------|---------|-------|--------|
-| triplet_model.py | Model architecture | - | Keras model class |
-| triplet_data_generator.py | Load & batch images | Image folder | Triplet batches |
-| train_triplet.py | Train model | triplet_data_generator | triplet_base_final.h5 |
-| extract_features_triplet.py | Get embeddings | triplet_base_final.h5 | .npy files |
-| app_triplet.py | Web server | Models + embeddings | JSON responses |
-| index.html | Web UI | - | User interface |
-| rename_images.py | Organize images | Image folder | Renamed files |
+- **Not enough images:** add genuinely labeled images per category; do not invent labels.
+- **Model missing:** complete training before feature extraction or search.
+- **Embeddings missing:** run `python extract_features_triplet.py` after training.
+- **Dataset/model changed:** retrain and regenerate the manifest and embeddings together.
+- **Out of memory:** reduce `--batch-size`; the custom CNN can be expensive on CPU.
+- **Port in use:** change port 5000 at the end of `app_triplet.py`.
 
-## Performance
-
-- Training: 5-10 minutes (10 epochs, 1000 images)
-- Feature extraction: 2-3 minutes (1000 images)
-- Single search: <100ms
-- Batch size: 16 triplets per step
-- Embedding size: 128 dimensions
-
----
-
-**Ready to use. Start with:** `python rename_images.py` → `python train_triplet.py` → `python extract_features_triplet.py` → `python app_triplet.py`
-   - Use data augmentation during training
-
-## Future Improvements
-
-Planned enhancements:
-- Hard negative mining for better training
-- Automatic threshold tuning
-- Batch API endpoint
-- Containerized deployment (Docker)
-- Mobile inference support
-- Incremental index updates
-
-## License
-
-This project is open source and available under the MIT License.
-
-## Contributing
-
-Contributions are welcome! Please feel free to:
-- Report bugs and issues
-- Suggest new features
-- Improve documentation
-- Submit pull requests
-
-## Citation
-
-If you use this project in your research or work, please cite:
-```
-@software{image_similarity_search,
-  title={AI Image Similarity Search},
-  author={Your Name},
-  year={2026},
-  url={https://github.com/yourusername/AI-Image-Similarity-Search}
-}
-```
-
-## Support
-
-For questions, issues, or suggestions:
-1. Check existing GitHub issues
-2. Create a new issue with detailed description
-3. Include error messages and steps to reproduce
-4. Attach sample images if relevant
+The bundled Flask entry point enables debug mode for local development.
 
 ## Acknowledgments
-Special thanks to Intel for giving us this opportunity.
 
-Built with:
-- TensorFlow/Keras for deep learning
-- OpenCV for image processing
-- hnswlib for efficient indexing
-- Flask for web interface
-
----
-
-Last updated: January 2026
-
-For more information, visit the GitHub repository or check the project wiki.
+Thanks to Intel for the project opportunity.

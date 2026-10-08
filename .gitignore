@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.test-tmp/
+triplet_base_final.h5
+triplet_features.npy
+triplet_images.npy
+dataset_split.json
+evaluation_report.json
+training_history.json
+training_history.png
+triplet_embedding_space.png
+static/uploads/
+checkpoints/

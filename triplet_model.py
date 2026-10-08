@@ -9,6 +9,14 @@ from tensorflow.keras import layers
 import numpy as np
 
 
+@keras.utils.register_keras_serializable(package='ImageSimilarity')
+class L2Normalization(layers.Layer):
+    """Serializable unit-length embedding output, without an anonymous Lambda."""
+
+    def call(self, inputs):
+        return tf.math.l2_normalize(inputs, axis=-1)
+
+
 def triplet_loss(y_true, y_pred, margin=0.2):
     """
     Triplet Loss Function
@@ -110,10 +118,7 @@ def create_base_network(input_shape=(224, 224, 3), embedding_dim=128):
     embeddings = layers.Dense(embedding_dim, activation=None, name='embeddings')(x)
     
     # L2 normalization - makes embeddings unit length
-    embeddings = layers.Lambda(
-        lambda x: tf.math.l2_normalize(x, axis=1),
-        name='l2_normalization'
-    )(embeddings)
+    embeddings = L2Normalization(name='l2_normalization')(embeddings)
     
     model = keras.Model(inputs=inputs, outputs=embeddings, name='base_network')
     return model
