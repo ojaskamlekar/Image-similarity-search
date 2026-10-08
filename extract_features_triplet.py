@@ -4,6 +4,10 @@ Extracts embeddings for all images in the dataset
 """
 
 import os
+import argparse
+import hashlib
+import json
+from pathlib import Path
 import cv2
 import numpy as np
 from tensorflow import keras
@@ -43,7 +47,7 @@ class TripletFeatureExtractor:
         
         print("=" * 60)
     
-    def preprocess_image(self, image_path, target_size=(224, 224)):
+    def preprocess_image(self, image_path, target_size=None):
         """
         Load and preprocess a single image
         
@@ -54,6 +58,8 @@ class TripletFeatureExtractor:
         Returns:
             Preprocessed image array ready for model input
         """
+        if target_size is None:
+            target_size = (self.model.input_shape[2], self.model.input_shape[1])
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"Could not load image: {image_path}")
@@ -75,8 +81,21 @@ class TripletFeatureExtractor:
             Embedding vector (flattened numpy array)
         """
         img = self.preprocess_image(image_path)
-        embedding = self.model.predict(img, verbose=0)
+        embedding = self.model(img, training=False).numpy()
         return embedding.flatten()
+
+    def extract_paths(self, image_paths, batch_size=16):
+        """Batch inference for evaluation/indexing; fail on unreadable images."""
+        if batch_size < 1 or not image_paths:
+            raise ValueError('Need images and a positive batch size')
+        outputs = []
+        for start in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[start:start + batch_size]
+            inputs = np.concatenate([self.preprocess_image(str(p)) for p in batch_paths])
+            outputs.append(self.model(inputs, training=False).numpy())
+            if start % (batch_size * 20) == 0 or start + batch_size >= len(image_paths):
+                print(f'Embedded {min(start + batch_size, len(image_paths))}/{len(image_paths)} images', flush=True)
+        return np.concatenate(outputs)
     
     def extract_all_features(self, image_folder, output_prefix='triplet'):
         """
@@ -198,10 +217,18 @@ class TripletFeatureExtractor:
 def main():
     """Main feature extraction function"""
     
-    # Configuration
-    MODEL_PATH = 'triplet_base_final.h5'
-    IMAGE_FOLDER = 'static/dataset'
-    OUTPUT_PREFIX = 'triplet'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model', default='triplet_base_final.h5')
+    parser.add_argument('--image-folder', default='static/dataset')
+    parser.add_argument('--output-prefix', default='triplet')
+    parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--no-visualization', action='store_true')
+    args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error('Batch size must be positive')
+    MODEL_PATH = args.model
+    IMAGE_FOLDER = args.image_folder
+    OUTPUT_PREFIX = args.output_prefix
     
     print("\n" + "=" * 60)
     print("🎯 TRIPLET FEATURE EXTRACTION PIPELINE")
@@ -211,17 +238,26 @@ def main():
     extractor = TripletFeatureExtractor(MODEL_PATH)
     
     # Step 2: Extract features for all images
-    features, image_names = extractor.extract_all_features(
-        IMAGE_FOLDER, 
-        output_prefix=OUTPUT_PREFIX
-    )
+    paths = sorted(p for p in Path(IMAGE_FOLDER).iterdir() if p.suffix.lower() in {'.jpg', '.jpeg', '.png'})
+    features = extractor.extract_paths(paths, args.batch_size)
+    image_names = [p.name for p in paths]
+    Path(OUTPUT_PREFIX).parent.mkdir(parents=True, exist_ok=True)
+    np.save(f'{OUTPUT_PREFIX}_features.npy', features)
+    np.save(f'{OUTPUT_PREFIX}_images.npy', np.asarray(image_names))
+    metadata = {'model_sha256': hashlib.sha256(Path(MODEL_PATH).read_bytes()).hexdigest(),
+                'image_count': len(paths), 'embedding_dimension': int(features.shape[1]),
+                'preprocessing': {'input_shape': list(extractor.model.input_shape[1:]),
+                                  'color': 'RGB', 'dtype': 'float32', 'scale': 'divide by 255'},
+                'images': [{'filename': p.name, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
+                           for p in paths]}
+    Path(f'{OUTPUT_PREFIX}_metadata.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     
     # Step 3: Optional visualization
-    if len(features) > 0:
+    if len(features) > 1 and not args.no_visualization:
         print("\n📊 Creating embedding space visualization...")
         extractor.visualize_embedding_space(
             np.array(features),
-            output_file='triplet_embedding_space.png'
+            output_file=f'{OUTPUT_PREFIX}_embedding_space.png'
         )
     
     # Summary
@@ -229,11 +265,10 @@ def main():
     print("✅ FEATURE EXTRACTION COMPLETE!")
     print("=" * 60)
     print(f"📁 Generated Files:")
-    print(f"   ✓ triplet_features.npy ({len(features)} embeddings)")
-    print(f"   ✓ triplet_images.npy ({len(image_names)} filenames)")
-    print(f"   ✓ triplet_embedding_space.png (visualization)")
+    print(f"   ✓ {OUTPUT_PREFIX}_features.npy ({len(features)} embeddings)")
+    print(f"   ✓ {OUTPUT_PREFIX}_images.npy ({len(image_names)} filenames)")
     print(f"\n🎯 Next Step: Run Flask app with updated features")
-    print(f"   Update app.py to load 'triplet_features.npy'")
+    print(f"   Set IMAGE_SIMILARITY_FEATURE_PREFIX to '{OUTPUT_PREFIX}'")
     print("=" * 60)
 
 

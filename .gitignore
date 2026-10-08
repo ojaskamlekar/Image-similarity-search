@@ -1,6 +1,14 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-wsl/
+.python/
+.python-wsl/
+.uv-cache/
+.uv-cache-wsl/
+.tools/
+data/
+runs/
 .test-tmp/
 triplet_base_final.h5
 triplet_features.npy

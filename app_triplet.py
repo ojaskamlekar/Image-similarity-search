@@ -3,7 +3,7 @@ Flask App using Triplet Network Embeddings
 Fashion Similarity Search with trained Triplet Network
 """
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory, url_for
 import os
 import cv2
 import numpy as np
@@ -15,7 +15,7 @@ from similarity_scoring import distance_scores, SCORE_DESCRIPTION
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['DATASET_FOLDER'] = 'static/dataset'
+app.config['DATASET_FOLDER'] = os.path.abspath(os.environ.get('IMAGE_SIMILARITY_DATASET_FOLDER', 'static/dataset'))
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -28,7 +28,7 @@ print("=" * 60)
 
 try:
     model = keras.models.load_model(
-        'triplet_base_final.h5',
+        os.environ.get('IMAGE_SIMILARITY_MODEL_PATH', 'triplet_base_final.h5'),
         custom_objects={'triplet_loss': triplet_loss},
         compile=False
     )
@@ -40,8 +40,11 @@ except Exception as e:
 
 # Load pre-computed embeddings
 try:
-    features = np.load("triplet_features.npy")
-    image_names = np.load("triplet_images.npy")
+    feature_prefix = os.environ.get('IMAGE_SIMILARITY_FEATURE_PREFIX', 'triplet')
+    features = np.load(f"{feature_prefix}_features.npy")
+    image_names = np.load(f"{feature_prefix}_images.npy")
+    if features.ndim != 2 or len(features) != len(image_names) or not np.isfinite(features).all():
+        raise ValueError('Invalid search index')
     print(f"✅ Loaded {len(image_names)} image embeddings")
     print(f"📊 Embedding dimension: {features.shape[1]}")
 except Exception as e:
@@ -85,6 +88,12 @@ def allowed_file(filename):
 def index():
     """Render main page"""
     return render_template('index.html')
+
+
+@app.route('/dataset/<path:filename>')
+def dataset_image(filename):
+    """Serve the configured dataset without copying it into the demo directory."""
+    return send_from_directory(app.config['DATASET_FOLDER'], filename)
 
 
 @app.route('/search', methods=['POST'])
@@ -148,7 +157,7 @@ def search():
                 break
             if similarity_scores[idx] >= similarity_threshold:
                 results.append({
-                    'image': f'/static/dataset/{image_names[idx]}',
+                    'image': url_for('dataset_image', filename=str(image_names[idx])),
                     'name': str(image_names[idx]),
                     'score': float(round(similarity_scores[idx], 3)),
                     'similarity': float(round(similarity_scores[idx], 3)),  # Compatibility alias
@@ -175,7 +184,7 @@ def gallery():
     """Get all images in dataset"""
     try:
         return jsonify({
-            'images': [f'/static/dataset/{name}' for name in image_names],
+            'images': [url_for('dataset_image', filename=str(name)) for name in image_names],
             'total': len(image_names)
         })
     except:

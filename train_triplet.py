@@ -3,35 +3,43 @@
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from dataset_utils import discover_images, split_records, split_counts
 
 
 class TripletTrainer:
-    def __init__(self, triplet_model, base_network, data_generator, validation_generator):
+    def __init__(self, triplet_model, base_network, data_generator, validation_generator, output_dir='.'):
         self.triplet_model = triplet_model
         self.base_network = base_network
         self.data_generator = data_generator
         self.validation_generator = validation_generator
         self.history = {'loss': [], 'val_loss': []}
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def train(self, epochs=10, batch_size=16, steps_per_epoch=20, validation_steps=10, save_every=5):
         import numpy as np
         if min(epochs, batch_size, steps_per_epoch, validation_steps, save_every) < 1:
             raise ValueError('Training counts must be positive')
-        Path('checkpoints').mkdir(exist_ok=True)
+        (self.output_dir / 'checkpoints').mkdir(exist_ok=True)
         # Fixed validation triplets make epoch comparisons reproducible.
         validation_batches = [self.validation_generator.generate_batch(batch_size)
                               for _ in range(validation_steps)]
         dummy = np.zeros((batch_size, 1), dtype='float32')
         best_loss = float('inf')
         for epoch in range(epochs):
+            started = time.monotonic()
             train_losses = []
-            for _ in range(steps_per_epoch):
+            for step in range(steps_per_epoch):
                 self.triplet_model.reset_metrics()
                 inputs = self.data_generator.generate_batch(batch_size)
                 train_losses.append(float(self.triplet_model.train_on_batch(list(inputs), dummy)))
+                if (step + 1) % 25 == 0 or step + 1 == steps_per_epoch:
+                    print(f'Epoch {epoch + 1}/{epochs}, step {step + 1}/{steps_per_epoch}: '
+                          f'loss={np.mean(train_losses[-25:]):.5f}, '
+                          f'elapsed={time.monotonic() - started:.0f}s', flush=True)
             val_losses = []
             for inputs in validation_batches:
                 self.triplet_model.reset_metrics()
@@ -39,13 +47,14 @@ class TripletTrainer:
             loss, val_loss = float(np.mean(train_losses)), float(np.mean(val_losses))
             self.history['loss'].append(loss)
             self.history['val_loss'].append(val_loss)
-            print(f'Epoch {epoch + 1}/{epochs}: loss={loss:.5f}, val_loss={val_loss:.5f}')
+            print(f'Epoch {epoch + 1}/{epochs}: loss={loss:.5f}, val_loss={val_loss:.5f}', flush=True)
             if val_loss < best_loss:
                 best_loss = val_loss
-                self.base_network.save('triplet_base_final.h5')
+                self.base_network.save(str(self.output_dir / 'triplet_base_final.h5'))
+                print('Saved improved validation checkpoint', flush=True)
             if (epoch + 1) % save_every == 0:
-                self.base_network.save(f'checkpoints/triplet_base_epoch_{epoch + 1}.h5')
-        Path('training_history.json').write_text(json.dumps(self.history, indent=2))
+                self.base_network.save(str(self.output_dir / 'checkpoints' / f'triplet_base_epoch_{epoch + 1}.h5'))
+            (self.output_dir / 'training_history.json').write_text(json.dumps(self.history, indent=2))
         import matplotlib.pyplot as plt
         for name, values in self.history.items():
             plt.plot(range(1, epochs + 1), values, label=name)
@@ -53,7 +62,7 @@ class TripletTrainer:
         plt.ylabel('Triplet loss (squared Euclidean distance)')
         plt.legend()
         plt.tight_layout()
-        plt.savefig('training_history.png')
+        plt.savefig(self.output_dir / 'training_history.png')
         plt.close()
         return self.history
 
@@ -74,6 +83,8 @@ def main():
     parser.add_argument('--smoke-test', action='store_true',
                         help='Allow a small dataset; reports remain explicitly non-benchmark')
     parser.add_argument('--audit-only', action='store_true', help='Validate labels and splits without TensorFlow')
+    parser.add_argument('--output-dir', default='.', help='Directory for model, manifest, and training history')
+    parser.add_argument('--require-gpu', action='store_true', help='Fail rather than silently train on CPU')
     args = parser.parse_args()
     if min(args.epochs, args.batch_size, args.steps_per_epoch, args.validation_steps,
            args.min_test_images) < 1:
@@ -95,6 +106,19 @@ def main():
     from triplet_data_generator import TripletDataGenerator
     from triplet_model import create_triplet_network, compile_triplet_model
     tf.keras.utils.set_random_seed(args.seed)
+    devices = tf.config.list_physical_devices('GPU')
+    if args.require_gpu and not devices:
+        parser.error('No TensorFlow GPU available')
+    for device in devices:
+        tf.config.experimental.set_memory_growth(device, True)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if (output_dir / 'triplet_base_final.h5').exists():
+        parser.error('Output model already exists; choose a new --output-dir')
+    config = {**vars(args), 'tensorflow_version': tf.__version__,
+              'gpu_devices': [str(d) for d in devices], 'input_shape': [224, 224, 3],
+              'embedding_dimension': 128}
+    (output_dir / 'run_config.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
     train_data = TripletDataGenerator(args.image_folder, records=splits['train'], seed=args.seed)
     val_data = TripletDataGenerator(args.image_folder, records=splits['validation'], seed=args.seed + 1)
     # Decode all images up front; corrupt images must not silently reduce the evaluation set.
@@ -102,12 +126,12 @@ def main():
         train_data.load_and_preprocess_image(Path(args.image_folder) / row['filename'])
     triplet_model, base_network = create_triplet_network()
     compile_triplet_model(triplet_model)
-    trainer = TripletTrainer(triplet_model, base_network, train_data, val_data)
+    trainer = TripletTrainer(triplet_model, base_network, train_data, val_data, output_dir)
     trainer.train(args.epochs, args.batch_size, args.steps_per_epoch, args.validation_steps)
     manifest = {'schema_version': 1, 'seed': args.seed, 'smoke_test': args.smoke_test,
                 'minimum_test_images': args.min_test_images, 'counts': counts, 'splits': splits,
-                'model_sha256': hashlib.sha256(Path('triplet_base_final.h5').read_bytes()).hexdigest()}
-    Path('dataset_split.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                'model_sha256': hashlib.sha256((output_dir / 'triplet_base_final.h5').read_bytes()).hexdigest()}
+    (output_dir / 'dataset_split.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print('Saved best validation checkpoint and dataset_split.json. Run evaluate_triplet.py next.')
 
 
