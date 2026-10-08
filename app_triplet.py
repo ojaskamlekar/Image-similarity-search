@@ -7,10 +7,11 @@ from flask import Flask, render_template, request, jsonify
 import os
 import cv2
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
+from sklearn.metrics.pairwise import euclidean_distances
 from tensorflow import keras
 from werkzeug.utils import secure_filename
 from triplet_model import triplet_loss
+from similarity_scoring import distance_scores, SCORE_DESCRIPTION
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
@@ -110,10 +111,15 @@ def search():
     
     try:
         # Get search parameters
-        num_results = int(request.form.get('num_results', 10))
+        try:
+            num_results = int(request.form.get('num_results', 10))
+            similarity_threshold = float(request.form.get('threshold', 0.3))
+        except ValueError:
+            return jsonify({'error': 'num_results and threshold must be numeric'}), 400
         num_results = min(max(num_results, 5), min(50, len(features)))
         
-        similarity_threshold = float(request.form.get('threshold', 0.3))
+        if not np.isfinite(similarity_threshold) or not 0 <= similarity_threshold <= 1:
+            return jsonify({'error': 'Score threshold must be between 0 and 1'}), 400
         
         # Save uploaded file
         filename = secure_filename(file.filename)
@@ -130,7 +136,7 @@ def search():
         
         # Convert distances to similarity scores (0 to 1, where 1 is most similar)
         # For normalized embeddings, distance is in range [0, 2]
-        similarity_scores = 1 - (distances / 2.0)
+        similarity_scores = distance_scores(distances)
         
         # Get indices sorted by similarity (descending)
         sorted_indices = similarity_scores.argsort()[::-1]
@@ -144,7 +150,8 @@ def search():
                 results.append({
                     'image': f'/static/dataset/{image_names[idx]}',
                     'name': str(image_names[idx]),
-                    'similarity': float(round(similarity_scores[idx], 3)),
+                    'score': float(round(similarity_scores[idx], 3)),
+                    'similarity': float(round(similarity_scores[idx], 3)),  # Compatibility alias
                     'distance': float(round(distances[idx], 3))
                 })
         
@@ -153,7 +160,10 @@ def search():
             'query_image': f'/static/uploads/{filename}',
             'results': results,
             'total_matches': len(results),
-            'method': 'Triplet Network with Euclidean Distance'
+            'method': 'Triplet Network with Euclidean Distance',
+            'score_type': 'distance_based_similarity',
+            'score_description': SCORE_DESCRIPTION,
+            'calibrated_probability': False
         })
     
     except Exception as e:
@@ -181,7 +191,9 @@ def stats():
         'total_images': len(image_names),
         'embedding_dimension': features.shape[1] if len(features) > 0 else 0,
         'model_type': 'Triplet Network',
-        'similarity_metric': 'Euclidean Distance'
+        'similarity_metric': 'Euclidean Distance',
+        'score_description': SCORE_DESCRIPTION,
+        'calibrated_probability': False
     })
 
 

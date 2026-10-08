@@ -1,193 +1,115 @@
-"""
-Quick Training Script for Small Datasets
-Reduced epochs and steps for faster completion
-"""
+"""Train on explicit image partitions; reserve test images for retrieval evaluation."""
 
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime
-from tensorflow import keras
+import argparse
+import hashlib
+import json
+from pathlib import Path
 
-from triplet_data_generator import TripletDataGenerator
-from triplet_model import create_triplet_network, compile_triplet_model
+from dataset_utils import discover_images, split_records, split_counts
 
 
 class TripletTrainer:
-    """Handles training of the Triplet Network"""
-    
-    def __init__(self, triplet_model, base_network, data_generator):
+    def __init__(self, triplet_model, base_network, data_generator, validation_generator):
         self.triplet_model = triplet_model
         self.base_network = base_network
         self.data_generator = data_generator
+        self.validation_generator = validation_generator
         self.history = {'loss': [], 'val_loss': []}
-    
-    def train(self, epochs=10, batch_size=16, steps_per_epoch=20, 
-              validation_split=0.2, save_every=5):
-        """Quick training with reduced parameters"""
-        
-        print("\n" + "=" * 60)
-        print("🚀 QUICK TRIPLET NETWORK TRAINING")
-        print("=" * 60)
-        print(f"📊 Training Configuration:")
-        print(f"   Epochs: {epochs} (reduced from 50)")
-        print(f"   Batch Size: {batch_size} (reduced from 32)")
-        print(f"   Steps per Epoch: {steps_per_epoch} (reduced from 100)")
-        print(f"   Estimated Time: ~5-10 minutes")
-        print("=" * 60)
-        
-        val_steps = int(steps_per_epoch * validation_split)
-        train_steps = steps_per_epoch - val_steps
-        
-        os.makedirs('checkpoints', exist_ok=True)
-        
+
+    def train(self, epochs=10, batch_size=16, steps_per_epoch=20, validation_steps=10, save_every=5):
+        import numpy as np
+        if min(epochs, batch_size, steps_per_epoch, validation_steps, save_every) < 1:
+            raise ValueError('Training counts must be positive')
+        Path('checkpoints').mkdir(exist_ok=True)
+        # Fixed validation triplets make epoch comparisons reproducible.
+        validation_batches = [self.validation_generator.generate_batch(batch_size)
+                              for _ in range(validation_steps)]
+        dummy = np.zeros((batch_size, 1), dtype='float32')
+        best_loss = float('inf')
         for epoch in range(epochs):
-            print(f"\n📈 Epoch {epoch + 1}/{epochs}")
-            print("-" * 60)
-            
-            # Training phase
             train_losses = []
-            for step in range(train_steps):
-                anchors, positives, negatives = self.data_generator.generate_batch(batch_size)
-                dummy_labels = np.zeros((batch_size, 1))
-                
-                loss = self.triplet_model.train_on_batch(
-                    [anchors, positives, negatives],
-                    dummy_labels
-                )
-                
-                train_losses.append(loss)
-                
-                if (step + 1) % 5 == 0:
-                    avg_loss = np.mean(train_losses[-5:])
-                    print(f"   Step {step + 1}/{train_steps} - Loss: {avg_loss:.4f}")
-            
-            # Validation phase
+            for _ in range(steps_per_epoch):
+                self.triplet_model.reset_metrics()
+                inputs = self.data_generator.generate_batch(batch_size)
+                train_losses.append(float(self.triplet_model.train_on_batch(list(inputs), dummy)))
             val_losses = []
-            if val_steps > 0:
-                for step in range(val_steps):
-                    anchors, positives, negatives = self.data_generator.generate_batch(batch_size)
-                    dummy_labels = np.zeros((batch_size, 1))
-                    
-                    loss = self.triplet_model.test_on_batch(
-                        [anchors, positives, negatives],
-                        dummy_labels
-                    )
-                    val_losses.append(loss)
-            
-            epoch_train_loss = np.mean(train_losses)
-            epoch_val_loss = np.mean(val_losses) if val_losses else 0.0
-            
-            self.history['loss'].append(epoch_train_loss)
-            self.history['val_loss'].append(epoch_val_loss)
-            
-            print(f"\n✅ Epoch {epoch + 1} Summary:")
-            print(f"   Training Loss: {epoch_train_loss:.4f}")
-            if val_losses:
-                print(f"   Validation Loss: {epoch_val_loss:.4f}")
-            
+            for inputs in validation_batches:
+                self.triplet_model.reset_metrics()
+                val_losses.append(float(self.triplet_model.test_on_batch(list(inputs), dummy)))
+            loss, val_loss = float(np.mean(train_losses)), float(np.mean(val_losses))
+            self.history['loss'].append(loss)
+            self.history['val_loss'].append(val_loss)
+            print(f'Epoch {epoch + 1}/{epochs}: loss={loss:.5f}, val_loss={val_loss:.5f}')
+            if val_loss < best_loss:
+                best_loss = val_loss
+                self.base_network.save('triplet_base_final.h5')
             if (epoch + 1) % save_every == 0:
-                checkpoint_path = f'checkpoints/triplet_base_epoch_{epoch + 1}.h5'
-                self.base_network.save(checkpoint_path)
-                print(f"💾 Checkpoint saved: {checkpoint_path}")
-        
-        print("\n" + "=" * 60)
-        print("🎉 TRAINING COMPLETE!")
-        print("=" * 60)
-        
-        final_model_path = 'triplet_base_final.h5'
-        self.base_network.save(final_model_path)
-        print(f"✅ Final model saved: {final_model_path}")
-        
-        self.plot_training_history()
-        
+                self.base_network.save(f'checkpoints/triplet_base_epoch_{epoch + 1}.h5')
+        Path('training_history.json').write_text(json.dumps(self.history, indent=2))
+        import matplotlib.pyplot as plt
+        for name, values in self.history.items():
+            plt.plot(range(1, epochs + 1), values, label=name)
+        plt.xlabel('Epoch')
+        plt.ylabel('Triplet loss (squared Euclidean distance)')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('training_history.png')
+        plt.close()
         return self.history
-    
-    def plot_training_history(self):
-        """Plot training and validation loss"""
-        try:
-            plt.figure(figsize=(10, 6))
-            plt.plot(self.history['loss'], label='Training Loss', linewidth=2)
-            if self.history['val_loss'] and self.history['val_loss'][0] != 0:
-                plt.plot(self.history['val_loss'], label='Validation Loss', linewidth=2)
-            plt.xlabel('Epoch', fontsize=12)
-            plt.ylabel('Triplet Loss', fontsize=12)
-            plt.title('Quick Training History', fontsize=14, fontweight='bold')
-            plt.legend(fontsize=10)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            
-            plot_path = 'training_history.png'
-            plt.savefig(plot_path, dpi=300)
-            print(f"📊 Training plot saved: {plot_path}")
-            plt.close()
-        except Exception as e:
-            print(f"⚠ Could not save training plot: {e}")
 
 
 def main():
-    """Quick training function"""
-    
-    # REDUCED CONFIGURATION FOR FASTER TRAINING
-    IMAGE_FOLDER = "static/dataset"
-    INPUT_SHAPE = (224, 224, 3)
-    EMBEDDING_DIM = 128
-    MARGIN = 0.2
-    LEARNING_RATE = 0.0001
-    
-    EPOCHS = 10              # Reduced from 50
-    BATCH_SIZE = 16          # Reduced from 32
-    STEPS_PER_EPOCH = 20     # Reduced from 100
-    VALIDATION_SPLIT = 0.2
-    SAVE_EVERY = 5
-    
-    print("\n" + "=" * 60)
-    print("⚡ QUICK TRIPLET NETWORK TRAINING")
-    print("=" * 60)
-    print(f"⚠ WARNING: Only 9 images detected in categories!")
-    print(f"   This is a test run with limited data")
-    print(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
-    
-    # Step 1: Load dataset
-    print("\n📊 STEP 1: Loading Dataset")
-    data_generator = TripletDataGenerator(IMAGE_FOLDER, target_size=INPUT_SHAPE[:2])
-    stats = data_generator.get_statistics()
-    
-    # Step 2: Create model
-    print("\n🏗️  STEP 2: Building Model")
-    triplet_model, base_network = create_triplet_network(
-        input_shape=INPUT_SHAPE,
-        embedding_dim=EMBEDDING_DIM
-    )
-    
-    # Step 3: Compile model
-    print("\n⚙️  STEP 3: Compiling Model")
-    compile_triplet_model(triplet_model, learning_rate=LEARNING_RATE, margin=MARGIN)
-    
-    # Step 4: Train model (QUICK VERSION)
-    print("\n⚡ STEP 4: Quick Training")
-    trainer = TripletTrainer(triplet_model, base_network, data_generator)
-    history = trainer.train(
-        epochs=EPOCHS,
-        batch_size=BATCH_SIZE,
-        steps_per_epoch=STEPS_PER_EPOCH,
-        validation_split=VALIDATION_SPLIT,
-        save_every=SAVE_EVERY
-    )
-    
-    # Final summary
-    print("\n" + "=" * 60)
-    print("✅ QUICK TRAINING COMPLETE!")
-    print("=" * 60)
-    print(f"📁 Generated Files:")
-    print(f"   ✓ triplet_base_final.h5")
-    print(f"   ✓ training_history.png")
-    print(f"\n⚠ NOTE: Results may not be optimal with only 9 images")
-    print(f"   Consider organizing more images into categories")
-    print(f"\n🎯 Next Step: python extract_features_triplet.py")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--image-folder', default='static/dataset')
+    parser.add_argument('--labels-csv', help='CSV with filename,label columns; otherwise use category prefixes')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--steps-per-epoch', type=int, default=20)
+    parser.add_argument('--validation-steps', type=int, default=10)
+    parser.add_argument('--validation-fraction', type=float, default=0.2)
+    parser.add_argument('--test-fraction', type=float, default=0.2)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--min-test-images', type=int, default=100,
+                        help='Project guardrail, not a statistical guarantee')
+    parser.add_argument('--smoke-test', action='store_true',
+                        help='Allow a small dataset; reports remain explicitly non-benchmark')
+    parser.add_argument('--audit-only', action='store_true', help='Validate labels and splits without TensorFlow')
+    args = parser.parse_args()
+    if min(args.epochs, args.batch_size, args.steps_per_epoch, args.validation_steps,
+           args.min_test_images) < 1:
+        parser.error('Counts must be positive')
+    try:
+        records = discover_images(args.image_folder, args.labels_csv)
+        splits = split_records(records, args.validation_fraction, args.test_fraction, args.seed)
+        counts = split_counts(splits)
+        print(json.dumps(counts, indent=2))
+        if not args.smoke_test and len(splits['test']) < args.min_test_images:
+            raise ValueError(f"Only {len(splits['test'])} unique held-out test images; "
+                             f"need at least {args.min_test_images}. Add labeled data, "
+                             "or use --smoke-test for pipeline checks only.")
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
+    if args.audit_only:
+        return
+    import tensorflow as tf
+    from triplet_data_generator import TripletDataGenerator
+    from triplet_model import create_triplet_network, compile_triplet_model
+    tf.keras.utils.set_random_seed(args.seed)
+    train_data = TripletDataGenerator(args.image_folder, records=splits['train'], seed=args.seed)
+    val_data = TripletDataGenerator(args.image_folder, records=splits['validation'], seed=args.seed + 1)
+    # Decode all images up front; corrupt images must not silently reduce the evaluation set.
+    for row in records:
+        train_data.load_and_preprocess_image(Path(args.image_folder) / row['filename'])
+    triplet_model, base_network = create_triplet_network()
+    compile_triplet_model(triplet_model)
+    trainer = TripletTrainer(triplet_model, base_network, train_data, val_data)
+    trainer.train(args.epochs, args.batch_size, args.steps_per_epoch, args.validation_steps)
+    manifest = {'schema_version': 1, 'seed': args.seed, 'smoke_test': args.smoke_test,
+                'minimum_test_images': args.min_test_images, 'counts': counts, 'splits': splits,
+                'model_sha256': hashlib.sha256(Path('triplet_base_final.h5').read_bytes()).hexdigest()}
+    Path('dataset_split.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    print('Saved best validation checkpoint and dataset_split.json. Run evaluate_triplet.py next.')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
