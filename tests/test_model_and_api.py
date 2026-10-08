@@ -35,6 +35,16 @@ class ModelAndApiTests(unittest.TestCase):
             reloaded = tf.keras.models.load_model(path, compile=False)
             np.testing.assert_allclose(base(inputs, training=False).numpy(),
                                        reloaded(inputs, training=False).numpy(), atol=1e-5)
+            import cv2
+            from extract_features_triplet import TripletFeatureExtractor
+            paths = [Path(folder) / f'{i}.jpg' for i in range(3)]
+            for i, image_path in enumerate(paths):
+                cv2.imwrite(str(image_path), np.full((48, 48, 3), 40 + i * 30, dtype=np.uint8))
+            extractor = TripletFeatureExtractor(path)
+            batched = extractor.extract_paths(paths, batch_size=2)
+            singles = np.stack([extractor.extract_features(str(p)) for p in paths])
+            self.assertEqual(batched.shape, (3, 8))
+            np.testing.assert_allclose(batched, singles, atol=1e-5)
 
     def test_api_scores_and_threshold_validation(self):
         import app_triplet as app_module

@@ -4,6 +4,8 @@ A Flask demo that ranks images by Euclidean distance between learned embeddings.
 The model is a custom convolutional network trained from scratch with triplet loss.
 Model quality has **not** been established on a representative held-out benchmark.
 
+For the user-selected Clothing Dataset, see [training and local demo instructions](CLOTHING_TRAINING.md).
+
 ## Setup
 
 Use **Python 3.10 or 3.11** in a virtual environment:
@@ -38,6 +40,9 @@ counts as relevant during training and evaluation, so inspect them manually.
 **Do not use `rename_images.py` to generate training labels:** that legacy utility
 distributes files arbitrarily and cannot determine what is in an image.
 Numeric filename ranges are no longer treated as categories.
+
+An optional `group` CSV column keeps related images together across splits.
+The Clothing Dataset importer uses contributor IDs as groups.
 
 ```bash
 python train_triplet.py --audit-only
@@ -168,7 +173,7 @@ and `threshold` (0–1). For example, a result at distance 0.18 has score 0.91:
   "success": true,
   "query_image": "/static/uploads/query.jpg",
   "results": [{
-    "image": "/static/dataset/shirt_002.jpg",
+    "image": "/dataset/shirt_002.jpg",
     "name": "shirt_002.jpg",
     "score": 0.91,
     "similarity": 0.91,
